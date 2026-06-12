@@ -11,6 +11,7 @@ const env = {
     process.env.JUDGE0_CALLBACK_URL ||
     "https://judge0-callback.100xdevs.com/submission-callback",
   MOUNT_PATH: process.env.MOUNT_PATH,
+  ENGINE_API_URL: process.env.ENGINE_API_URL || "https://nishpapa-keetcode-engine.hf.space",
 };
 
 export default env;
