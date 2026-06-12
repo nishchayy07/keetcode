@@ -1,0 +1,9 @@
+#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    int solve(int num1, int num2) {
+        
+    }
+};

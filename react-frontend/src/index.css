@@ -1,0 +1,421 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Dark Mode (default) CSS Variables ───────────────────── */
+@layer base {
+  :root,
+  html.dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 95%;
+
+    --card: 240 10% 6%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 240 10% 5%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 186 100% 50%;
+    --primary-foreground: 240 10% 3.9%;
+
+    --secondary: 240 5% 16%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 240 5% 13%;
+    --muted-foreground: 240 5% 55%;
+
+    --accent: 240 5% 16%;
+    --accent-foreground: 0 0% 95%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5% 14%;
+    --input: 240 5% 14%;
+    --ring: 186 100% 50%;
+
+    --radius: 0.625rem;
+
+    /* Keet custom tokens — Dark */
+    --keet-bg:       #09090b;
+    --keet-surface:  #18181b;
+    --keet-elevated: #27272a;
+    --keet-border:   rgba(255, 255, 255, 0.07);
+    --keet-text-primary:   #f4f4f5;
+    --keet-text-secondary: #a1a1aa;
+    --keet-text-muted:     #52525b;
+    --keet-accent-primary: #22d3ee;  /* cyan */
+    --keet-accent-solid:   #6366f1;  /* indigo */
+    --keet-scrollbar-track: #09090b;
+    --keet-scrollbar-thumb: #3f3f46;
+    --keet-scrollbar-hover: #22d3ee;
+  }
+}
+
+/* ─── Light Mode CSS Variables ────────────────────────────── */
+@layer base {
+  html.light {
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    --primary: 239 84% 67%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 214 32% 91%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 214 32% 91%;
+    --muted-foreground: 215 25% 45%;
+
+    --accent: 214 32% 91%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 239 84% 67%;
+
+    /* Keet custom tokens — Light */
+    --keet-bg:       #f8fafc;
+    --keet-surface:  #ffffff;
+    --keet-elevated: #f1f5f9;
+    --keet-border:   rgba(0, 0, 0, 0.08);
+    --keet-text-primary:   #0f172a;
+    --keet-text-secondary: #475569;
+    --keet-text-muted:     #94a3b8;
+    --keet-accent-primary: #4f46e5;  /* indigo-600 */
+    --keet-accent-solid:   #4f46e5;
+    --keet-scrollbar-track: #f1f5f9;
+    --keet-scrollbar-thumb: #cbd5e1;
+    --keet-scrollbar-hover: #6366f1;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html {
+    @apply antialiased;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  body {
+    background-color: var(--keet-bg);
+    color: var(--keet-text-primary);
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+  }
+
+  ::selection {
+    background-color: rgba(99, 102, 241, 0.25);
+    color: var(--keet-text-primary);
+  }
+}
+
+/* ─── Scrollbars ─────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--keet-scrollbar-thumb) var(--keet-scrollbar-track);
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-track {
+  background: var(--keet-scrollbar-track);
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--keet-scrollbar-thumb);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--keet-scrollbar-hover);
+}
+
+/* ─── Custom Animations ──────────────────────────────────── */
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 8px 0 rgba(34, 211, 238, 0.3); }
+  50%       { box-shadow: 0 0 20px 4px rgba(34, 211, 238, 0.6); }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
+}
+
+@keyframes theme-icon-in {
+  from { opacity: 0; transform: rotate(-90deg) scale(0.7); }
+  to   { opacity: 1; transform: rotate(0deg) scale(1); }
+}
+
+/* ─── Utility Classes ────────────────────────────────────── */
+@layer components {
+  /* Glass card — dark/light variants */
+  .glass-card {
+    background: rgba(24, 24, 27, 0.75);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+  }
+  html.light .glass-card {
+    background: rgba(255, 255, 255, 0.85);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.07);
+  }
+
+  .glow-cyan {
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.3),
+                0 0 40px rgba(34, 211, 238, 0.1);
+  }
+  .glow-cyan-hover:hover {
+    box-shadow: 0 0 28px rgba(34, 211, 238, 0.45),
+                0 0 56px rgba(34, 211, 238, 0.15);
+  }
+  .glow-indigo {
+    box-shadow: 0 0 20px rgba(99, 102, 241, 0.35),
+                0 0 40px rgba(99, 102, 241, 0.12);
+  }
+  .glow-indigo-hover:hover {
+    box-shadow: 0 0 28px rgba(99, 102, 241, 0.5),
+                0 0 56px rgba(99, 102, 241, 0.18);
+  }
+
+  .animate-fade-in-up     { animation: fade-in-up 0.5s ease-out both; }
+  .animate-pulse-glow     { animation: pulse-glow 2s ease-in-out infinite; }
+  .animate-float          { animation: float 3s ease-in-out infinite; }
+  .animate-theme-icon-in  { animation: theme-icon-in 0.25s ease-out both; }
+
+  .animate-shimmer {
+    background: linear-gradient(90deg, #18181b 25%, #27272a 37%, #18181b 63%);
+    background-size: 400% 100%;
+    animation: shimmer 1.4s ease infinite;
+  }
+  html.light .animate-shimmer {
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 37%, #f1f5f9 63%);
+    background-size: 400% 100%;
+  }
+
+  .skeleton {
+    @apply animate-shimmer rounded-md;
+  }
+
+  /* ── Difficulty badge variants — dual mode ── */
+  .badge-easy {
+    @apply text-xs font-semibold px-2.5 py-0.5 rounded-full;
+    background: rgba(16, 185, 129, 0.10);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.20);
+  }
+  html.light .badge-easy {
+    background: rgba(16, 185, 129, 0.10);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.25);
+  }
+
+  .badge-medium {
+    @apply text-xs font-semibold px-2.5 py-0.5 rounded-full;
+    background: rgba(245, 158, 11, 0.10);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.20);
+  }
+  html.light .badge-medium {
+    background: rgba(245, 158, 11, 0.10);
+    color: #d97706;
+    border: 1px solid rgba(245, 158, 11, 0.25);
+  }
+
+  .badge-hard {
+    @apply text-xs font-semibold px-2.5 py-0.5 rounded-full;
+    background: rgba(244, 63, 94, 0.10);
+    color: #fb7185;
+    border: 1px solid rgba(244, 63, 94, 0.20);
+  }
+  html.light .badge-hard {
+    background: rgba(244, 63, 94, 0.10);
+    color: #e11d48;
+    border: 1px solid rgba(244, 63, 94, 0.25);
+  }
+
+  /* Tag pill */
+  .tag-pill {
+    @apply text-xs font-mono px-2.5 py-1 rounded-full transition-colors;
+    background: rgba(255, 255, 255, 0.04);
+    color: #71717a;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  html.light .tag-pill {
+    background: rgba(0, 0, 0, 0.04);
+    color: #64748b;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+  }
+  .tag-pill:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  html.light .tag-pill:hover {
+    border-color: rgba(0, 0, 0, 0.15);
+  }
+
+  /* Resizable panel drag handle */
+  .panel-handle-bar {
+    @apply transition-colors duration-150;
+    background: rgba(255, 255, 255, 0.06);
+  }
+  html.light .panel-handle-bar {
+    background: rgba(0, 0, 0, 0.08);
+  }
+
+  /* Prevent child elements (like Monaco Editor) from capturing pointer events during drag */
+  [data-group]:has([data-resize-handle-state="drag"]) [data-panel] {
+    pointer-events: none !important;
+  }
+
+  /* Status dot colors */
+  .status-ac      { @apply text-emerald-400; }
+  .status-fail    { @apply text-rose-400; }
+  .status-tle     { @apply text-rose-400; }
+  .status-ce      { @apply text-rose-400; }
+  .status-pending { @apply text-amber-400; }
+
+  /* Theme transition for all interactive surfaces */
+  .theme-transition {
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+}
+
+/* ─── Prose overrides — dual mode ────────────────────────── */
+.prose-keet {
+  color: var(--keet-text-secondary);
+  line-height: 1.75;
+}
+.prose-keet h1, .prose-keet h2, .prose-keet h3, .prose-keet h4 {
+  color: var(--keet-text-primary);
+  font-weight: 700;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.prose-keet p { margin-bottom: 1em; }
+.prose-keet ul, .prose-keet ol { padding-left: 1.5em; }
+.prose-keet li { margin-bottom: 0.25em; }
+.prose-keet strong { color: var(--keet-text-primary); font-weight: 600; }
+.prose-keet em { color: var(--keet-text-secondary); }
+.prose-keet a { color: var(--keet-accent-primary); text-decoration: none; }
+.prose-keet a:hover { text-decoration: underline; }
+.prose-keet blockquote {
+  border-left: 3px solid var(--keet-accent-primary);
+  border-left-opacity: 0.4;
+  padding-left: 1em;
+  color: var(--keet-text-muted);
+  font-style: italic;
+}
+.prose-keet code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.85em;
+  background: var(--keet-elevated);
+  border: 1px solid var(--keet-border);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  color: var(--keet-accent-primary);
+}
+.prose-keet pre {
+  background: var(--keet-bg);
+  border: 1px solid var(--keet-border);
+  border-radius: 8px;
+  padding: 1em 1.25em;
+  overflow-x: auto;
+  position: relative;
+}
+.prose-keet pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--keet-text-secondary);
+  font-size: 0.875em;
+}
+.prose-keet table { width: 100%; border-collapse: collapse; }
+.prose-keet th {
+  background: var(--keet-elevated);
+  color: var(--keet-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.5em 1em;
+  border: 1px solid var(--keet-border);
+}
+.prose-keet td {
+  padding: 0.5em 1em;
+  border: 1px solid var(--keet-border);
+  color: var(--keet-text-secondary);
+}
+
+/* ─── Monaco Editor overrides — dark ────────────────────── */
+html.dark .monaco-editor,
+html.dark .monaco-editor-background,
+html.dark .monaco-editor .margin {
+  background-color: #09090b !important;
+}
+html.dark .monaco-editor .current-line {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: none !important;
+}
+
+/* ─── Monaco Editor overrides — light ───────────────────── */
+html.light .monaco-editor,
+html.light .monaco-editor-background,
+html.light .monaco-editor .margin {
+  background-color: #ffffff !important;
+}
+html.light .monaco-editor .current-line {
+  background: rgba(79, 70, 229, 0.04) !important;
+  border: none !important;
+}
+
+.monaco-scrollbar-shadow {
+  box-shadow: none !important;
+}

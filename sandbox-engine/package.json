@@ -1,0 +1,14 @@
+{
+  "name": "keetcode-sandbox-engine",
+  "version": "1.0.0",
+  "description": "Secure, lightweight, sandboxed code execution engine for KeetCode",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "fs-extra": "^11.2.0",
+    "uuid": "^9.0.1"
+  }
+}
