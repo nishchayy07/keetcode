@@ -59,7 +59,7 @@ app.use("/problems", problemsRouter);
 app.use("/problem", problemsRouter);
 
 // Start database-backed queue worker
-startQueueWorker();
+// startQueueWorker();
 
 const PORT = env.PORT;
 

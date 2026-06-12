@@ -7,13 +7,11 @@ import { LANGUAGE_MAPPING } from "../language";
 import env from "../config/env";
 
 const router = Router();
-const JUDGE0_URI = env.JUDGE0_URI;
 
 const RunInput = z.object({
   code:       z.string(),
   languageId: z.enum(["c", "cpp", "java", "python", "go"]),
   problemId:  z.string(),
-  // Public example test cases sent directly from the frontend
   examples: z.array(
     z.object({
       input:  z.string(),
@@ -22,29 +20,26 @@ const RunInput = z.object({
   ).min(1),
 });
 
-// Helper functions for base64 encoding and decoding
-function encodeB64(str: string): string {
-  return Buffer.from(str || "").toString("base64");
-}
-
-function decodeB64(str: string | null | undefined): string {
-  if (!str) return "";
-  return Buffer.from(str, "base64").toString("utf-8");
-}
-
-// Poll Judge0 until all tokens are done (status id >= 3)
-async function pollUntilDone(tokens: string[], maxWaitMs = 15000) {
-  const deadline = Date.now() + maxWaitMs;
-  while (Date.now() < deadline) {
-    const res = await axios.get(
-      `${JUDGE0_URI}/submissions/batch?tokens=${tokens.join(",")}&base64_encoded=true&fields=token,status,stdout,stderr,compile_output,time,memory,stdin,expected_output`
-    );
-    const subs = res.data.submissions as any[];
-    const allDone = subs.every((s: any) => s.status?.id >= 3);
-    if (allDone) return subs;
-    await new Promise((r) => setTimeout(r, 700));
+// Helper function to inject stdin redirection into full code
+function injectInput(code: string, language: string, input: string): string {
+  if (language === "cpp") {
+    // Prepend sstream header
+    let newCode = "#include <sstream>\n" + code;
+    // Inject redirection at the start of main
+    newCode = newCode.replace(/int\s+main\s*\(\s*\)\s*\{/, `int main() {
+  std::string __input_data = ${JSON.stringify(input)};
+  std::istringstream __iss(__input_data);
+  std::cin.rdbuf(__iss.rdbuf());`);
+    return newCode;
+  } else if (language === "python") {
+    // Prepend sys.stdin override
+    const overrideCode = `import sys
+import io
+sys.stdin = io.StringIO(${JSON.stringify(input)})
+`;
+    return overrideCode + code;
   }
-  throw new Error("Run timed out");
+  return code;
 }
 
 router.post("/", async (req: any, res) => {
@@ -53,12 +48,34 @@ router.post("/", async (req: any, res) => {
     return res.status(401).json({ message: "You must be logged in to run code" });
   }
 
+  // Enforce production environment variable presence
+  const engineApiUrl = process.env.ENGINE_API_URL || env.ENGINE_API_URL;
+  if (!engineApiUrl) {
+    console.error("[run] Server Configuration Error: ENGINE_API_URL is missing.");
+    return res.status(500).json({
+      message: "Server Configuration Error: ENGINE_API_URL environment variable is not defined.",
+      error: "Server Configuration Error: ENGINE_API_URL environment variable is not defined.",
+    });
+  }
+
   const parsed = RunInput.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ message: "Invalid input", errors: parsed.error.issues });
   }
 
   const { code, languageId, problemId, examples } = parsed.data;
+
+  // Map input languageId to Hugging Face execution engine supported languages (cpp, python)
+  let engineLang: string;
+  if (languageId === "cpp" || languageId === "c") {
+    engineLang = "cpp";
+  } else if (languageId === "python") {
+    engineLang = "python";
+  } else {
+    return res.status(400).json({
+      message: `Language '${languageId}' is not supported by the execution engine. Only C++ and Python are supported.`,
+    });
+  }
 
   try {
     // Resolve slug from DB
@@ -69,49 +86,106 @@ router.post("/", async (req: any, res) => {
     const problem = await getProblem(dbProblem.slug, languageId);
     const fullCode = problem.fullBoilerplateCode.replace("##USER_CODE_HERE##", code);
 
-    // Submit to Judge0 WITHOUT a callback_url → results stay in Judge0 only, no DB record
-    const judge0Res = await axios.post(
-      `${JUDGE0_URI}/submissions/batch?base64_encoded=true`,
-      {
-        submissions: examples.map(({ input, output }) => ({
-          language_id: LANGUAGE_MAPPING[languageId]?.judge0,
-          source_code: encodeB64(fullCode),
-          stdin: encodeB64(input),
-          expected_output: encodeB64(output),
-        })),
+    // Call execution engine microservice in parallel for each example input
+    try {
+      const results = await Promise.all(
+        examples.map(async (ex, i) => {
+          const injectedCode = injectInput(fullCode, engineLang, ex.input);
+
+          let stdout = "";
+          let stderr = "";
+          let compile_output = "";
+          let executionError = "";
+          let isSuccess = false;
+
+          // Production log statement right before request is fired
+          console.log(`Routing execution request for case ${i + 1} to:`, engineApiUrl);
+
+          try {
+            const engineResponse = await axios.post(
+              `${engineApiUrl}/execute`,
+              {
+                language: engineLang,
+                code: injectedCode,
+              },
+              {
+                timeout: 25000, // strict 25 seconds configuration timeout to handle cold starts
+              }
+            );
+
+            const responseData = engineResponse.data;
+            stdout = responseData.stdout || "";
+            stderr = responseData.stderr || "";
+            compile_output = responseData.compile_output || "";
+            executionError = responseData.error || "";
+            isSuccess = !!responseData.success;
+          } catch (err: any) {
+            console.error(`[run] Error calling execution service for case ${i + 1}:`, err.message);
+            if (err.code === "ECONNABORTED" || err.message?.toLowerCase().includes("timeout")) {
+              throw { isTimeout: true };
+            }
+            executionError = err.response?.data?.error || err.message || "Failed to reach execution engine.";
+          }
+
+          let status = "Accepted";
+          let passed = true;
+
+          if (isSuccess) {
+            // Compare stdout to expected output
+            const cleanStdout = stdout.trim().replace(/\r\n/g, "\n");
+            const cleanExpected = ex.output.trim().replace(/\r\n/g, "\n");
+            if (cleanStdout === cleanExpected) {
+              status = "Accepted";
+              passed = true;
+            } else {
+              status = "Wrong Answer";
+              passed = false;
+            }
+          } else {
+            passed = false;
+            if (executionError.includes("Time Limit Exceeded")) {
+              status = "Time Limit Exceeded";
+            } else if (compile_output) {
+              status = "Compilation Error";
+            } else {
+              status = "Runtime Error";
+            }
+          }
+
+          return {
+            index:           i,
+            token:           `mock-run-${i}-${Date.now()}`,
+            status:          status,
+            statusId:        isSuccess && passed ? 3 : 4,
+            stdin:           ex.input,
+            expected:        ex.output,
+            stdout:          stdout,
+            stderr:          stderr || (executionError && !compile_output ? executionError : ""),
+            compile_output:  compile_output,
+            time:            0.1,
+            memory:          1024,
+            passed:          passed,
+          };
+        })
+      );
+
+      return res.json({ results });
+
+    } catch (innerErr: any) {
+      if (innerErr.isTimeout) {
+        return res.status(504).json({
+          message: "Remote compiler cold start timeout. Please try again in a moment.",
+          error: "Remote compiler cold start timeout. Please try again in a moment.",
+        });
       }
-    );
-
-    const tokens: string[] = judge0Res.data.map((s: any) => s.token);
-
-    // Synchronously poll until all cases finish
-    const results = await pollUntilDone(tokens);
-
-    return res.json({
-      results: results.map((r: any, i: number) => ({
-        index:           i,
-        token:           r.token,
-        status:          r.status?.description ?? "Unknown",
-        statusId:        r.status?.id,
-        stdin:           examples[i].input,
-        expected:        examples[i].output,
-        stdout:          decodeB64(r.stdout),
-        stderr:          decodeB64(r.stderr),
-        compile_output:  decodeB64(r.compile_output),
-        time:            r.time,
-        memory:          r.memory,
-        passed:          r.status?.id === 3, // 3 = Accepted
-      })),
-    });
-  } catch (err: any) {
-    if (err.response) {
-      console.error("[run] Error response status:", err.response.status);
-      console.error("[run] Error response data:", JSON.stringify(err.response.data));
+      throw innerErr;
     }
-    console.error("[run] Error message:", err.message);
+
+  } catch (err: any) {
+    console.error("[run] Unexpected error processing request:", err.message);
     return res.status(500).json({
       message: "Run failed",
-      error: err.response?.data || err.message,
+      error: err.message,
     });
   }
 });

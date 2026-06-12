@@ -5,10 +5,30 @@ import { SubmissionInput } from "../zod/submissionInput";
 import { getProblem } from "../lib/problems";
 import { LANGUAGE_MAPPING } from "../language";
 import env from "../config/env";
-import { mapJudge0StatusToTestCaseResult, updateSubmissionState } from "../lib/judge0";
 
 const router = Router();
-const JUDGE0_URI = env.JUDGE0_URI;
+
+// Helper function to inject stdin redirection into full code
+function injectInput(code: string, language: string, input: string): string {
+  if (language === "cpp") {
+    // Prepend sstream header
+    let newCode = "#include <sstream>\n" + code;
+    // Inject redirection at the start of main
+    newCode = newCode.replace(/int\s+main\s*\(\s*\)\s*\{/, `int main() {
+  std::string __input_data = ${JSON.stringify(input)};
+  std::istringstream __iss(__input_data);
+  std::cin.rdbuf(__iss.rdbuf());`);
+    return newCode;
+  } else if (language === "python") {
+    // Prepend sys.stdin override
+    const overrideCode = `import sys
+import io
+sys.stdin = io.StringIO(${JSON.stringify(input)})
+`;
+    return overrideCode + code;
+  }
+  return code;
+}
 
 router.post("/", async (req: any, res) => {
   const userId = req.userId;
@@ -18,10 +38,32 @@ router.post("/", async (req: any, res) => {
     });
   }
 
+  // Enforce production environment variable presence
+  const engineApiUrl = process.env.ENGINE_API_URL || env.ENGINE_API_URL;
+  if (!engineApiUrl) {
+    console.error("[submit] Server Configuration Error: ENGINE_API_URL is missing.");
+    return res.status(500).json({
+      message: "Server Configuration Error: ENGINE_API_URL environment variable is not defined.",
+      error: "Server Configuration Error: ENGINE_API_URL environment variable is not defined.",
+    });
+  }
+
   const parsedBody = SubmissionInput.safeParse(req.body);
   if (!parsedBody.success) {
     return res.status(400).json({
       message: "Invalid input",
+    });
+  }
+
+  const inputLang = parsedBody.data.languageId;
+  let engineLang: string;
+  if (inputLang === "cpp" || inputLang === "c") {
+    engineLang = "cpp";
+  } else if (inputLang === "python") {
+    engineLang = "python";
+  } else {
+    return res.status(400).json({
+      message: `Language '${inputLang}' is not supported by the execution engine. Only C++ and Python are supported.`,
     });
   }
 
@@ -48,6 +90,7 @@ router.post("/", async (req: any, res) => {
       parsedBody.data.code,
     );
 
+    // 1. Create a database Submission record in PENDING state
     const submission = await prismaClient.submission.create({
       data: {
         userId: userId,
@@ -59,12 +102,166 @@ router.post("/", async (req: any, res) => {
       },
     });
 
-    return res.json({
-      message: "Submission made",
-      id: submission.id,
-    });
+    // Call execution engine microservice in parallel for all problem inputs
+    try {
+      const testCaseResults = await Promise.all(
+        problem.inputs.map(async (input, index) => {
+          const injectedCode = injectInput(fullCode, engineLang, input);
+          const expectedOutput = problem.outputs[index];
+
+          let stdout = "";
+          let stderr = "";
+          let compile_output = "";
+          let executionError = "";
+          let isSuccess = false;
+
+          // Production log statement right before request is fired
+          console.log(`Routing submission test case ${index} to:`, engineApiUrl);
+
+          try {
+            const engineResponse = await axios.post(
+              `${engineApiUrl}/execute`,
+              {
+                language: engineLang,
+                code: injectedCode,
+              },
+              {
+                timeout: 25000, // strict 25 seconds configuration timeout to handle cold starts
+              }
+            );
+
+            const responseData = engineResponse.data;
+            stdout = responseData.stdout || "";
+            stderr = responseData.stderr || "";
+            compile_output = responseData.compile_output || "";
+            executionError = responseData.error || "";
+            isSuccess = !!responseData.success;
+          } catch (err: any) {
+            console.error(`[submit] Error calling execution service for test case ${index}:`, err.message);
+            if (err.code === "ECONNABORTED" || err.message?.toLowerCase().includes("timeout")) {
+              throw { isTimeout: true };
+            }
+            executionError = err.response?.data?.error || err.message || "Failed to reach execution engine.";
+          }
+
+          let testCaseStatus: string = "PENDING";
+          if (isSuccess) {
+            // Compare stdout to expectedOutput
+            const cleanStdout = stdout.trim().replace(/\r\n/g, "\n");
+            const cleanExpected = expectedOutput.trim().replace(/\r\n/g, "\n");
+            if (cleanStdout === cleanExpected) {
+              testCaseStatus = "AC";
+            } else {
+              testCaseStatus = "FAIL";
+            }
+          } else {
+            if (executionError.includes("Time Limit Exceeded")) {
+              testCaseStatus = "TLE";
+            } else if (executionError.includes("Compilation Failed") || compile_output) {
+              testCaseStatus = "COMPILATION_ERROR";
+            } else {
+              testCaseStatus = "FAIL";
+            }
+          }
+
+          return {
+            index,
+            status: testCaseStatus,
+            stdout,
+            stderr: stderr || (executionError && !compile_output ? executionError : ""),
+            compile_output,
+            error: executionError,
+          };
+        })
+      );
+
+      const allPassed = testCaseResults.every((tc) => tc.status === "AC");
+      const finalSubmissionStatus = allPassed ? "AC" : "REJECTED";
+
+      // 2. Create TestCase records in database for each result
+      const createdTestCases = await Promise.all(
+        testCaseResults.map(async (tcResult) => {
+          return prismaClient.testCase.create({
+            data: {
+              submissionId: submission.id,
+              status: tcResult.status as any,
+              index: tcResult.index,
+              judge0TrackingId: `mock-submit-${submission.id}-${tcResult.index}`,
+              time: 0.1,
+              memory: 1024,
+              stdout: tcResult.stdout,
+              stderr: tcResult.stderr,
+              compile_output: tcResult.compile_output,
+              error: tcResult.error,
+            },
+          });
+        })
+      );
+
+      // 3. Update Submission record with final results
+      const updatedSubmission = await prismaClient.submission.update({
+        where: { id: submission.id },
+        data: {
+          status: finalSubmissionStatus,
+          time: 0.1, // mock run time
+          memory: 1024, // mock memory
+          stdout: testCaseResults.map(r => r.stdout).join("\n"),
+          stderr: testCaseResults.map(r => r.stderr).filter(Boolean).join("\n"),
+          compile_output: testCaseResults.find(r => r.compile_output)?.compile_output || null,
+          error: testCaseResults.map(r => r.error).filter(Boolean).join("\n"),
+        },
+      });
+
+      // 4. Update Clerk User stats if Accepted
+      if (finalSubmissionStatus === "AC") {
+        const alreadySolved = await prismaClient.submission.findFirst({
+          where: {
+            userId: userId,
+            problemId: parsedBody.data.problemId,
+            status: "AC",
+            id: { not: submission.id },
+          },
+        });
+
+        if (!alreadySolved) {
+          try {
+            await prismaClient.userProfile.update({
+              where: { clerkUserId: userId },
+              data: {
+                problemsSolved: {
+                  increment: 1,
+                },
+              },
+            });
+            console.log(`[submit] Incremented problemsSolved for user ${userId}`);
+          } catch (profileErr) {
+            console.error(`[submit] Failed to increment problemsSolved for user ${userId}:`, profileErr);
+          }
+        }
+      }
+
+      return res.json({
+        message: "Submission evaluated",
+        id: submission.id,
+        success: allPassed,
+        stdout: testCaseResults.map(r => r.stdout).join("\n"),
+        stderr: testCaseResults.map(r => r.stderr).filter(Boolean).join("\n"),
+        compile_output: testCaseResults.find(r => r.compile_output)?.compile_output || "",
+        error: testCaseResults.map(r => r.error).filter(Boolean).join("\n"),
+      });
+
+    } catch (innerErr: any) {
+      if (innerErr.isTimeout) {
+        return res.status(504).json({
+          message: "Remote compiler cold start timeout. Please try again in a moment.",
+          error: "Remote compiler cold start timeout. Please try again in a moment.",
+        });
+      }
+      throw innerErr;
+    }
+
   } catch (error: any) {
-    console.error(error);
+    console.error("[submit] Unexpected error processing submission:", error);
     return res.status(500).json({
       message: "Internal server error",
       error: error.message,
@@ -145,73 +342,11 @@ router.get("/", async (req: any, res) => {
       });
     }
 
-    let testCases = await prismaClient.testCase.findMany({
+    const testCases = await prismaClient.testCase.findMany({
       where: {
         submissionId: submissionId,
       },
     });
-
-    // Active polling fallback: If the submission is still PENDING, check Judge0
-    if (submission.status === "PENDING" && testCases.some((tc) => tc.status === "PENDING")) {
-      const pendingTestCases = testCases.filter((tc) => tc.status === "PENDING");
-      const tokens = pendingTestCases.map((tc) => tc.judge0TrackingId);
-
-      try {
-        const response = await axios.get(
-          `${JUDGE0_URI}/submissions/batch?tokens=${tokens.join(",")}&base64_encoded=false&fields=token,status,time,memory`
-        );
-
-        const judge0Submissions = response.data.submissions || [];
-        let dbUpdated = false;
-
-        for (const jSub of judge0Submissions) {
-          const statusId = jSub.status?.id;
-          // Status ID >= 3 means execution has finished (e.g. Accepted, Wrong Answer, etc.)
-          if (statusId && statusId >= 3) {
-            const resultStatus = mapJudge0StatusToTestCaseResult(
-              jSub.status.description || "",
-              statusId
-            );
-
-            await prismaClient.testCase.update({
-              where: {
-                judge0TrackingId: jSub.token,
-              },
-              data: {
-                status: resultStatus,
-                time: Number(jSub.time || 0),
-                memory: jSub.memory || 0,
-              },
-            });
-            dbUpdated = true;
-          }
-        }
-
-        if (dbUpdated) {
-          await updateSubmissionState(submissionId);
-
-          // Re-fetch the updated details from database
-          const updatedSubmission = await prismaClient.submission.findUnique({
-            where: {
-              id: submissionId,
-              userId: userId,
-            },
-          });
-          const updatedTestCases = await prismaClient.testCase.findMany({
-            where: {
-              submissionId: submissionId,
-            },
-          });
-
-          return res.json({
-            submission: updatedSubmission,
-            testCases: updatedTestCases,
-          });
-        }
-      } catch (err) {
-        console.error("Active polling check failed:", err);
-      }
-    }
 
     return res.json({
       submission,

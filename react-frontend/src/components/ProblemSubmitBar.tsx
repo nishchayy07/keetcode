@@ -337,9 +337,12 @@ export const ProblemSubmitBar = ({
           } catch {
             return {
               ...tc,
-              stdin: "", stdout: "", stderr: "", expected: "",
-              compile_output:    tc.status === "COMPILATION_ERROR" ? "Compilation Error" : "",
-              statusDescription: tc.status,
+              stdin:             tc.stdin || "",
+              stdout:            tc.stdout || "",
+              stderr:            tc.stderr || "",
+              expected:          tc.expected || "",
+              compile_output:    tc.compile_output || (tc.status === "COMPILATION_ERROR" ? "Compilation Error" : ""),
+              statusDescription: tc.statusDescription || tc.status,
             };
           }
         })
